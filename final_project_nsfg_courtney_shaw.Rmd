@@ -1,0 +1,349 @@
+---
+title: 'ADA Final Project'
+author: "Courtney Shaw"
+date: "12-08-2022"
+---
+
+##Part 1: Import Data 
+```{r include = FALSE}
+#load packages 
+library(tidyverse) 
+library(table1)
+library(dplyr)
+library(naniar)
+library(DiagrammeR)
+library(car) # for vif
+library(jtools) #for summ
+library(package = "knitr")
+
+```
+
+```{r}
+pacman::p_load(odds.n.ends, blorr, lmtest, car,  broom, tidyverse, jtools) #from class 6 demo, couldn't figure out VIF 
+```
+
+
+```{r include = FALSE}
+#load 2017_2019 data
+#use this if first time using NSFG dataset 
+#code from: https://github.com/ajdamico/lodown/issues/185 
+require("data.table")
+require("stringr")
+require("lodown")
+nsfg_cat = get_catalog("nsfg", output_dir = file.path( path.expand( "~" ) , "NSFG" ) )
+nsfg_dt = data.table(nsfg_cat)
+nsfg_dt = nsfg_dt[str_detect(output_filename, "2017_2019_MaleData.rds"), ]
+nsfg_cat = lodown("nsfg", nsfg_dt )
+```
+
+```{r}
+#Load dataset into dataframe
+nsfg_male_2017_2019 <- readRDS( file.path( path.expand( "~" ) , "NSFG" , "2017_2019_MaleData.rds" ))
+```
+
+
+##Part 2: Data Management and Cleaning
+```{r}
+#select variables of interest 
+total_nsfg <- nsfg_male_2017_2019 %>% 
+  dplyr::select(caseid, age_a, agescrn, rscrrace, totinc, educat, hadsex, sedcond, relcurr, hadsex, intctfam, marstat, fpuse, sex1mthd1, sex1mthd2, sex1mthd3, sex1mthd4)
+summary(total_nsfg)
+#n = 5206 
+```
+
+```{r}
+#inclusion = 15-24 yr olds 
+total_nsfg <- total_nsfg%>% 
+    filter(agescrn < 25) 
+#n = 1705 
+```
+
+```{r}
+#drop those who did not answer sex ed question, should be same as dropped age 
+total_nsfg <- total_nsfg %>% 
+  drop_na(sedcond)
+#n = 1705, makes sense! 
+```
+
+```{r}
+#Include only males who have had sex 
+total_nsfg <- total_nsfg %>% 
+  filter(hadsex ==1)
+#n = 995
+```
+
+```{r}
+summary(total_nsfg)
+```
+
+```{r}
+#create new factor variables
+total_nsfg <- total_nsfg %>%
+  mutate(race_new = case_when(rscrrace == 3  ~ 0,
+                                rscrrace == 2 ~ 1, 
+                                rscrrace == 4 ~ 2, 
+                                rscrrace == 1 ~ 3),
+         race_new = factor(race_new, 0:3, c("White", "Black", "Hispanic", "Other"))) %>%
+  mutate(totinc_4l = case_when(totinc %in% c(1,2,3,4,5,6,7)~0, 
+                               totinc %in% c(8,9,10,11)~1, 
+                               totinc %in% c(12,13)~2, 
+                               totinc %in% c(14)~3, 
+                               totinc %in% c(15)~4,
+                               totinc %in% c(97,98,99) ~ NA_real_), 
+         totinc_4l = factor(totinc_4l, 0:4, c("Under $25,000", "$25,000-49,999","$50,000-74,999", "$75,000-99,999", "$100,000 or more"  ) )) %>% 
+  mutate(relcurr_cat = case_when(relcurr == 1 ~ 0, 
+                                 relcurr != 1 ~ 1), 
+         relcurr_cat = factor(relcurr_cat, 0:1, c("Not religious", "Religious")))%>% 
+  mutate(educat_new=case_when(educat %in% c(9, 10, 11, 12)~0, 
+                              educat %in% c(13, 14, 15, 16, 17, 18, 19)~1), 
+         educat_new = factor(educat_new, 0:1, c("High School", "College")))%>% 
+  mutate(sedcond_new = case_when(sedcond == 1 ~ 1, #yes
+                                 sedcond == 5 ~ 0, #no
+                                 sedcond == 8 ~ NA_real_, 
+                                 sedcond == 9 ~ NA_real_), 
+         sedcond_new = factor(sedcond_new, 0:1, c("No", "Yes")))%>%
+  mutate(intctfam_new = case_when(intctfam == 1 ~ 0, # two parents from birth
+                                         intctfam == 2 ~ 1), # ANYTHING OTHER THAN 2 BIOLOGICAL OR ADOPTIVE PARENTS FROM BIRTH 
+         intctfam_new = factor(intctfam_new, 0:1, c("Two parents", "Not two parents")))
+```
+
+#### Ensure new variables created as intended 
+```{r}
+#check race recode 
+table(total_nsfg$rscrrace, useNA = "always")
+table(total_nsfg$race_new, total_nsfg$rscrrace, useNA = "always")
+```
+
+```{r}
+#check income recode 
+table(total_nsfg$totinc, useNA = "always")
+table(total_nsfg$totinc_4l, total_nsfg$totinc, useNA = "always")
+```
+
+```{r}
+#check religion recode
+table(total_nsfg$relcurr, useNA = "always")
+table(total_nsfg$relcurr_cat, total_nsfg$relcurr, useNA = "always")
+```
+
+```{r}
+#check education recode 
+table(total_nsfg$educat, useNA = "always")
+table(total_nsfg$educat_new, total_nsfg$educat, useNA = "always")
+```
+
+```{r}
+#check condom sex ed recode 
+table(total_nsfg$sedcond, useNA = "always")
+table(total_nsfg$sedcond_new, total_nsfg$sedcond, useNA = "always")
+```
+
+```{r}
+#check sexual intercourse with condom 
+table(total_nsfg$condvag, useNA = "always")
+table(total_nsfg$condvag_new, total_nsfg$condvag, useNA = "always")
+```
+
+```{r}
+#check intact recode
+table(total_nsfg$intctfam, useNA = "always")
+table(total_nsfg$intctfam_new, total_nsfg$intctfam, useNA = "always")
+```
+
+#### Create outcome variable 
+```{r}
+#birth control method at first time of intercourse included condoms (condom_use)
+#no birth control was used at all for first time of intercourse (no_bc)
+total_nsfg <- total_nsfg %>% 
+  mutate(condom_use = case_when(sex1mthd1 == 1 ~ 1, 
+                                sex1mthd2 == 1 ~ 1, 
+                                sex1mthd3 == 1 ~ 1, 
+                                sex1mthd4 == 1 ~ 1, 
+                                TRUE ~ 0)) %>% 
+  mutate(no_bc = case_when(sex1mthd1 == 96 ~ 1, 
+                           TRUE ~ 0))
+```
+
+
+```{r}
+#check new variable condom_use created correctly
+table(total_nsfg$condom_use,total_nsfg$no_bc, useNA = "always")
+```
+
+```{r}
+#check new variable no_bc created correctly
+table(total_nsfg$condom_use,total_nsfg$sex1mthd2, useNA = "always")
+```
+
+
+```{r}
+#create new outcome variable merging the two varibles condom_use and no_bc
+total_nsfg <- total_nsfg %>% 
+  mutate(frst_sex_condom = case_when(condom_use == 1 ~ 1, 
+                                     no_bc == 1 ~ 0), 
+         frst_sex_condom = factor(frst_sex_condom, 0:1, c("No Condom Used", "Condom Used"))) # %>% 
+```
+
+
+```{r}
+#check those excluded from outcome variable
+#should include males who used birth control methods that did not include a condom on first intercourse
+na_frst_sex_condom <- total_nsfg %>% 
+  filter(is.na(frst_sex_condom))
+```
+
+```{r}
+table1(~ ., 
+       data = na_frst_sex_condom)
+```
+
+table
+```{r}
+#2 Withdrawal 219
+#4 Pill 194
+table(na_frst_sex_condom$sex1mthd1, useNA = "always")
+table(na_frst_sex_condom$sex1mthd2, useNA = "always")
+table(na_frst_sex_condom$sex1mthd3, useNA = "always")
+table(na_frst_sex_condom$sex1mthd4, useNA = "always")
+#recode is correct, no values of sex1mthd include a "1" indicating condom use
+```
+
+```{r}
+#missing data = 1 male who did not know if they received sex ed on condom use 
+total_nsfg <- total_nsfg %>% 
+  drop_na(sedcond_new)
+```
+
+
+```{r}
+#select only new variables created and needed for analysis
+small_nsfg <- total_nsfg %>% 
+  dplyr::select(age_a, race_new, relcurr_cat, educat_new, sedcond_new, intctfam_new, condom_use, no_bc, marstat, frst_sex_condom) %>% 
+  drop_na(frst_sex_condom)
+```
+
+#### Flowchart of Inclusions and Exclusions 
+```{r}
+#Figure 1
+grViz("digraph flowchart {
+
+      # node definitions with substituted label text
+      node [fontname = Helvetica, shape = rectangle, fontsize=10] 
+      # notes indicate how many boxes you will have in your diagram. Since I have two sets of exclusions, I will have three nodes.
+      tab1 [label = '@@1'] # starting
+      tab2 [label = '@@2'] # exclusion 1
+      tab3 [label = '@@3'] # exclusion 2
+      tab4 [label = '@@4'] # exclusion 3
+      tab5 [label = '@@5'] # missing data 1
+      
+      # edge definitions with the node IDs are used to indicate how the rectangle boxes flow from each other. This is a simple flow chart but I could create branching instead as below
+      tab1 -> tab2 -> tab3 -> tab4 -> tab5
+}
+      #This set of code provides the text in each rectangle box.
+      [1]: 'Initial survey records of male particpants n = 5,206'
+      [2]: 'Including individuals 15-24 years old and answered sex education \\n question on condom use n 1,705' 
+      [3]: 'Excluding 710 indivduals who have not had sex n = 995'
+      [4]: 'Excluding 93 indivduals who used other types of birth control \\n but no condom during first sexual intercourse n = 902'
+      [5]: 'Dropped 1 individual who did not know if they recieved sex education on condom use n = 901'
+      ")
+
+
+```
+
+```{r}
+#create table and rename variables 
+label(small_nsfg$age_a)<-"Age (years)"
+label(small_nsfg$race_new)<-"Race"
+label(small_nsfg$educat_new)<-"Education"
+label(small_nsfg$relcurr_cat)<-"Religious"
+label(small_nsfg$intctfam_new)<-"Intact Family"
+label(small_nsfg$sedcond_new)<-"Sex Education Condom Use"
+label(small_nsfg$frst_sex_condom)<-"Condom Use at First Intercourse"
+
+table1(~ age_a + race_new + relcurr_cat + educat_new +  intctfam_new + sedcond_new +marstat | frst_sex_condom, 
+       data = small_nsfg)
+```
+
+## Part 3: Data visualization 
+```{r}
+ggplot(small_nsfg, aes(x = frst_sex_condom, y = age_a)) +
+      geom_boxplot(aes(fill = frst_sex_condom)) +
+      labs(x = "Using Condom at First Sex", y = "Age") +
+      theme_bw()
+```
+
+
+## DAG 
+ ![](dagv2.png)
+ 
+## Table 1 
+```{r}
+table1(~ age_a + race_new  + relcurr_cat + educat_new + sedcond_new + intctfam_new | frst_sex_condom,
+       data = small_nsfg, 
+       title = "Condom Use")
+```
+
+##Part 4: Data Analysis 
+
+##Create Unadjusted Model
+```{r}
+unadj_condom_model <- glm(frst_sex_condom ~ sedcond_new, 
+                             data = small_nsfg,
+                             family ="binomial")
+summary(unadj_condom_model)
+broom::tidy(unadj_condom_model, exponentiate = TRUE, conf.int = TRUE)
+```
+
+#checking assumptions for unadj_condom_model
+1. Binary dependent variable = YES 
+2. Independence of observations = YES 
+3. No multicollinearity (VIF) = Only one variable 
+4. No extreme outliers = YES
+5. Linearity = NA
+6. Sample size = YES
+
+
+#### Create Adjusted Model 
+```{r}
+#include all covariates 
+adj_condom_model <- glm(frst_sex_condom ~ race_new + intctfam_new + sedcond_new + relcurr_cat + age_a + educat_new, 
+                        data = small_nsfg, 
+                        family = binomial(link = "logit"))
+summary(adj_condom_model) 
+broom::tidy(adj_condom_model, exponentiate = TRUE, conf.int = TRUE)
+```
+
+#checking assumptions for adj_condom_model
+1. Binary dependent variable = YES 
+2. Independence of observations = YES 
+3. No multicollinearity (VIF) = No multicolinearity, VIF < 5 for all covariates
+4. No extreme outliers 
+5. Linearity = Not violated, p-value is greater than .05 
+6. Sample size
+
+
+```{r}
+#test for linearity for age_a
+small_nsfg <- small_nsfg %>% 
+  mutate(age.times.logage = age_a * log(age_a)) #create term to test linearity 
+
+log_age_model <- glm(frst_sex_condom ~ age_a + age.times.logage, data = small_nsfg, family = "binomial")
+summary(log_age_model)
+#age is not significant
+```
+
+## Look at assumptions of multicollinearity using the vif function from the car package
+don't really use this, dags help us identify multicollinearity 
+two degrees of freedom is number of levels - 1 
+
+```{r}
+#FROM CLASS 6
+vif(adj_condom_model)
+
+# another way from the jtools package
+summ(adj_condom_model, vifs = TRUE)
+# cutoff references: https://quantifyinghealth.com/vif-threshold/
+# df is the degress of freedom associated with the term
+```
+
+
