@@ -345,5 +345,61 @@ summ(adj_condom_model, vifs = TRUE)
 # cutoff references: https://quantifyinghealth.com/vif-threshold/
 # df is the degress of freedom associated with the term
 ```
+## Response to reviewers: Examine effect modification by race. Provide the results of the LR test and if significant provide stratified results by race in a table.
+```{r}
+# Model with sex education and race
+sexed_model_race <- glm(frst_sex_condom ~ sedcond_new + race_new, 
+                             data = small_nsfg,
+                             family ="binomial")
+
+# Model with sex education, race,  and race*sex education
+sexed_model_racesexed <- glm(frst_sex_condom ~  race_new + sedcond_new  + sedcond_new*race_new , 
+                        data = small_nsfg, 
+                        family = binomial(link = "logit"))
+
+broom::tidy(sexed_model_race, exponentiate = TRUE, conf.int = TRUE)
+broom::tidy(sexed_model_racesexed, exponentiate = TRUE, conf.int = TRUE)
+
+# Test the hypothesis with the lrtest
+lrtest(sexed_model_racesexed, sexed_model_race)
+
+```
+
+
+
+
+*****************************
+## DAG V3 with Response to review updates code 
+
+
+dag {
+bb="0,0,1,1"
+"Condom use during first sexual intercourse" [outcome,pos="0.744,0.391"]
+"Intact family at age 18" [pos="0.565,0.622"]
+"Sex education on how to use a condom" [exposure,pos="0.274,0.397"]
+Age [pos="0.494,0.216"]
+Education [pos="0.256,0.141"]
+Race [pos="0.707,0.146"]
+Religion [pos="0.422,0.624"]
+"Intact family at age 18" -> "Condom use during first sexual intercourse"
+"Intact family at age 18" -> "Sex education on how to use a condom"
+"Sex education on how to use a condom" -> "Condom use during first sexual intercourse"
+Age -> "Condom use during first sexual intercourse"
+Age -> "Sex education on how to use a condom"
+Age -> Education
+Age -> Religion
+Education -> "Condom use during first sexual intercourse"
+Education -> "Sex education on how to use a condom"
+Race -> "Condom use during first sexual intercourse"
+Race -> "Intact family at age 18"
+Race -> "Sex education on how to use a condom"
+Race -> Education
+Race -> Religion
+Religion -> "Condom use during first sexual intercourse"
+Religion -> "Sex education on how to use a condom"
+}
+
+
+
 
 
